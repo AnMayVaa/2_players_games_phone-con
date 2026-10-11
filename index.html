@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0c16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>2P Phone Party</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===================== BIG SCREEN (laptop / TV) ===================== -->
+<section id="host" hidden>
+  <div id="hub">
+    <header class="top">
+      <div class="brand">
+        <span class="logo">🎮</span>
+        <div><h1>2P Phone Party</h1><p>This screen is the console · two phones are the controllers</p></div>
+      </div>
+      <div class="top-r">
+        <div class="score-pill"><b style="color:var(--p1)" id="sc1">0</b> : <b style="color:var(--p2)" id="sc2">0</b></div>
+        <div id="net" class="net warn"><i></i><span>Starting…</span></div>
+      </div>
+    </header>
+
+    <div class="hub-grid">
+      <aside class="pc" data-n="1">
+        <div class="pc-head"><span class="badge">P1</span><b class="pc-name">Player 1</b><span class="pc-wins" title="wins">🏆 <b>0</b></span></div>
+        <div class="pc-qr">
+          <div class="qr" id="qr1"><span class="qr-wait">Creating room…</span></div>
+          <p>Scan with <b>Player 1</b>'s phone camera</p>
+          <a class="qr-url" id="qrurl1" target="_blank" rel="noopener"></a>
+        </div>
+        <div class="pc-live">
+          <div class="pc-stat">Waiting for phone…</div>
+          <div class="live-row">
+            <div class="tilt" title="tilt"><i></i></div>
+            <div class="live-bars">
+              <label>motion</label><div class="mbar"><i></i></div>
+              <label>touch / buttons</label><div class="tbar"><i></i></div>
+            </div>
+          </div>
+          <button class="pc-qrbtn" type="button">Show QR again</button>
+        </div>
+      </aside>
+
+      <main>
+        <h2 class="sec">Pick a game</h2>
+        <div id="games" class="games"></div>
+        <details class="settings">
+          <summary>Settings &amp; help</summary>
+          <div class="set-row">
+            <label for="phone-url">Phone page URL (QR target)</label>
+            <input id="phone-url" type="url" spellcheck="false">
+            <small>Phones need an <b>https</b> page for motion sensors. When this page is opened from GitHub Pages it uses its own address automatically.</small>
+          </div>
+          <div class="set-row">
+            <b>No phone handy?</b> Keyboard works too —
+            <span class="kbd">P1: W A S D + Q (action) / E (hold)</span>
+            <span class="kbd">P2: I J K L + U (action) / O (hold)</span>
+            <span class="kbd">Enter = start / rematch · Esc = back to hub</span>
+          </div>
+          <div class="set-row"><button id="reset-wins" type="button">Reset scores</button></div>
+        </details>
+      </main>
+
+      <aside class="pc" data-n="2">
+        <div class="pc-head"><span class="badge">P2</span><b class="pc-name">Player 2</b><span class="pc-wins" title="wins">🏆 <b>0</b></span></div>
+        <div class="pc-qr">
+          <div class="qr" id="qr2"><span class="qr-wait">Creating room…</span></div>
+          <p>Scan with <b>Player 2</b>'s phone camera</p>
+          <a class="qr-url" id="qrurl2" target="_blank" rel="noopener"></a>
+        </div>
+        <div class="pc-live">
+          <div class="pc-stat">Waiting for phone…</div>
+          <div class="live-row">
+            <div class="tilt" title="tilt"><i></i></div>
+            <div class="live-bars">
+              <label>motion</label><div class="mbar"><i></i></div>
+              <label>touch / buttons</label><div class="tbar"><i></i></div>
+            </div>
+          </div>
+          <button class="pc-qrbtn" type="button">Show QR again</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="game" hidden>
+    <canvas id="cv"></canvas>
+    <div class="gbar">
+      <button id="g-back" type="button">✕ Hub</button>
+      <span id="g-name"></span>
+      <span class="g-sp"></span>
+      <span class="g-pl" data-n="1"></span>
+      <span class="g-pl" data-n="2"></span>
+    </div>
+
+    <div id="intro" class="ovl" hidden>
+      <div class="panel">
+        <div class="i-icon"></div>
+        <h2 class="i-name"></h2>
+        <p class="i-desc"></p>
+        <ol class="i-how"></ol>
+        <div class="i-opts"></div>
+        <div class="i-ready">
+          <div class="rd" data-n="1"></div>
+          <div class="rd" data-n="2"></div>
+        </div>
+        <p class="i-keys"></p>
+        <div class="btns">
+          <button data-act="start" class="primary" type="button">Start ▶ <small>Enter</small></button>
+          <button data-act="hub" type="button">Back <small>Esc</small></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="result" class="ovl" hidden>
+      <div class="panel">
+        <div class="r-icon">🏆</div>
+        <h2 class="r-title"></h2>
+        <p class="r-detail"></p>
+        <div class="r-tally"></div>
+        <div class="i-ready">
+          <div class="rd" data-n="1"></div>
+          <div class="rd" data-n="2"></div>
+        </div>
+        <div class="btns">
+          <button data-act="again" class="primary" type="button">Rematch ↻ <small>Enter</small></button>
+          <button data-act="hub" type="button">Hub <small>Esc</small></button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+</section>
+
+<!-- ===================== PHONE CONTROLLER ===================== -->
+<section id="phone" hidden>
+  <div id="c-top">
+    <span id="c-badge">P1</span>
+    <span id="c-name">Player 1</span>
+    <span id="c-stat" class="warn"><i></i><em>Not connected</em></span>
+  </div>
+
+  <div id="c-start">
+    <div class="big-ic">🎮</div>
+    <h1 id="c-start-title">Player 1</h1>
+    <p>Controller for the big screen</p>
+    <label class="name-l">Your name <input id="c-nameinp" maxlength="16" autocomplete="off" autocapitalize="words"></label>
+    <button id="c-go" type="button">Connect &amp; start</button>
+    <ul class="notes">
+      <li>Allow <b>Motion &amp; Orientation</b> when asked</li>
+      <li>Turn the volume up — sounds are your feedback</li>
+      <li>Grip tight (wrist strap!) in shake &amp; swing games</li>
+    </ul>
+    <p id="c-perm" class="permwarn" hidden>Motion access was denied. iPhone: Settings › Apps › Safari › Motion &amp; Orientation Access → on, then reload this page.</p>
+    <p id="c-nosecure" class="permwarn" hidden>This page is not https — motion sensors are blocked. Open the https link instead.</p>
+  </div>
+
+  <div id="c-main" hidden>
+    <div class="lay" id="lay-text">
+      <div id="c-icon">🎮</div>
+      <div id="c-title">Connecting…</div>
+      <div id="c-hint"></div>
+      <div id="c-bar" hidden><i></i></div>
+      <div id="c-tap"></div>
+    </div>
+    <div class="lay" id="lay-saber" hidden>
+      <div class="blade"></div>
+      <div class="hilt"><i></i><i></i><i></i></div>
+      <div class="sab-hint">Swing to attack · hold upright &amp; still to block</div>
+    </div>
+    <div class="lay L" id="lay-race" hidden>
+      <div class="rbtn" id="rb-brake"><span>◀ BRAKE</span></div>
+      <div class="rbtn" id="rb-gas"><span>GAS ▶</span></div>
+      <div id="race-tip"><span>Hold sideways · tilt to steer</span></div>
+    </div>
+    <div class="lay" id="lay-safe" hidden>
+      <div id="safe-info">Lock 1 / 3</div>
+      <div id="dial"><div id="dial-face"></div><div id="dial-num"></div><div id="dial-mark"></div><div id="dial-hub"></div></div>
+      <div class="safe-hint">Phone flat · rotate slowly · listen · hold still on the CLICK</div>
+    </div>
+  </div>
+  <div id="c-big"></div>
+  <div id="c-flash"></div>
+</section>
+
+<script src="js/core.js"></script>
+<script src="js/host.js"></script>
+<script src="js/phone.js"></script>
+<script src="js/games.js"></script>
+<script>boot();</script>
+</body>
+</html>

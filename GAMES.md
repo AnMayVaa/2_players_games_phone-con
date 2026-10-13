@@ -1,6 +1,6 @@
 # 2P Phone Party — AI Context Guide
 
-> Read this before changing the code. Use case: a **computer** shows the game (big screen / host). **Two phones** are controllers, and each pairs through **its own QR** (P1, P2). The phones stream sensors to the host in real time.
+> Read this before changing the code. Use case: a **computer** shows the game (big screen / host). **Two phones** are the controllers, and each pairs through **its own QR** (P1, P2) and streams sensors to the host in real time. The project has 47 mini-games: 28 "Duel Classics" and 17 "Party Pack" games in the spirit of 1-2-Switch / Everybody 1-2-Switch!, plus 2 originals. It is fan-made and uses no Nintendo assets, names or logos.
 
 ---
 
@@ -8,121 +8,141 @@
 
 | Feature | Status | Notes |
 |---|---|---|
-| Two-QR pairing + live link (PeerJS/WebRTC) | ✅ verified in emulation (Chromium, host + iPhone 14 + Pixel 7 contexts) | Not yet confirmed on real phones |
-| All 6 games reach a winner | ✅ verified in emulation with synthetic motion events | |
-| Keyboard fallback (no phones) | ✅ verified | |
-| Drop detection (closed tab / lost Wi-Fi) | ✅ 5 s without sensor stream → slot freed | |
-| iOS accel sign auto-detect | ✅ verified (`M.sign` voting) | |
-| Real-device tuning (shake / swing / tremor thresholds) | ⚠ needs play-testing | Constants listed in §6 |
+| Two-QR pairing + live link (PeerJS/WebRTC) | ✅ emulation (Chromium host + iPhone 14 + Pixel 7) | |
+| All 47 games open, run and reach a result | ✅ emulation: keyboard bots + phone bots, 0 page errors | |
+| Light "party" theme (hub, overlays, phone) | ✅ | Font: M PLUS Rounded 1c (Google Fonts) |
+| Real-device tuning of motion thresholds | ⚠ needs play-testing | Constants in §6 and in each game |
+| Camera (Color Shoot) | ✅ emulation with fake camera | Needs https + camera permission |
 
 ---
 
 ## 2. Roles and files
 
-- `#pair=<hostId>&p=<1|2>[&srv=<url>]` in the URL → **phone** controller (`js/phone.js`). Without it → **host** (`js/host.js`).
-- `index.html` holds the markup for both roles: `#host` (hub + `#game` canvas) and `#phone`.
-- Load order: `core.js` → `host.js` → `phone.js` → `games.js` → `boot()`.
-- External scripts load lazily: `https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js`, `https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js`.
+- `#pair=<hostId>&p=<1|2>[&srv=<url>]` → **phone** controller (`js/phone.js`); otherwise → **host**.
+- Load order: `core.js` → `host.js` → `kit.js` → `phone.js` → `games.js` → `games-classic.js` → `games-classic2.js` → `games-party.js` (registry) → `boot()`.
 
 | Symbol | File | Purpose |
 |---|---|---|
-| `AU` | core | Web Audio synth (`tone`, `noise`, `tick`, `sfx(name)`), `unlock()` inside a tap, iOS `audioSession = "playback"` |
-| `HAPTIC.tap()` | core | iOS 18 `<input switch>` haptic (only works inside a user gesture) |
-| `peerOpts()`, `SRV` | core | Optional self-hosted PeerJS server (`?server=` on host, `&srv=` in the QR link) |
-| `H` | host | Host state: `phase` (hub/intro/count/play/result), `game`, `P[1..2]` players, `wins` |
-| `mkPlayer` fields | host | `us` smoothed up-vector, `l` peak linear G, `r` peak gyro °/s, `d` dial °, `tc` touching, `bt` buttons, `lat` one-way ms, `kb` keyboard state |
-| `S` | host | Input signals that work for phone **or** keyboard: `up`, `gas`, `brake`, `steer`, `calibrate`, `tiltFrom` |
+| `AU` | core | Web Audio synth: `tone(f,ms,vol,type,slide,at)`, `noise(...)`, `tick`, `seq`, `sfx(name)` (~40 named effects) |
+| `MUSIC` | core | Beat clock + synth backing track: `start(bpm, "pop"/"rock"/"calm")`, `stop()`, `at(k)` = performance-time of beat k, `beatNow()`, `nearest(t)` |
+| `HAPTIC.tap()`, `vibrate()` | core | iOS 18 switch haptic (in a gesture only) / Android vibration |
+| `H` | host | Host state: `phase` (hub/intro/count/play/result), `game`, `P[1..2]`, `wins` |
+| player fields | host | `us` smoothed up-vector, `l` peak linear G, `r` peak gyro °/s, `d` dial ° (around the screen normal), `vz:[min,max]` vertical accel G, `a` linear accel G, `g` gyro °/s, `gp` gyro vector at the peak, `rot:[x,y,z]` integrated rotations °, `tc` touching, `bt` buttons, `lat` one-way ms, `kb` keyboard |
+| `EV` / `EVENTS` | host | Motion events detected from the stream → `game.onEvent(p, name, strength, t)` (§4) |
+| `S` | host | Signals for phone **or** keyboard: `up`, `gas`, `brake`, `steer`, `calibrate`, `pose`, `still`, `tiltFrom` |
 | `send / sendAll / fx / phoneBar / pushUi / pushUiAll` | host | Messages to phones |
-| `openGame → showIntro → startCountdown → (play) → finish(w, detail) → rematch / backToHub` | host | Game flow |
-| `FX`, `SHAKE`, `text`, `rr`, `bar`, `nameTag` | host | Canvas particles, screen shake and draw helpers (logical 1600×900, letter-boxed) |
-| `C`, `M` | phone | Link/UI state; motion state (`u` up-vector, `pkL`, `pkR`, `dial`, `sign`) |
-| `applyUi`, `phoneFx`, `phoneLoop` | phone | Render host-requested screen, play feedback, per-frame race layout / saber hum / safe ticks |
-| `GAMES[]` | games | The game objects |
+| `openGame → showIntro → startCountdown → play → finish(w, detail) → rematch / backToHub` | host | Game flow |
+| `FX` (+`FX.say` floating text), `SHAKE`, `text`, `rr`, `bar`, `nameTag` | host/kit | Canvas helpers (logical 1600×900, letter-boxed) |
+| `paper`, `floorBand`, `disc`, `ring`, `pill`, `headline`, `hud`, `pips`, `person`, `phoneIcon` | kit | Shared flat look. `person()` draws the bean characters and returns hand positions |
+| `scoreGame(def)` | kit | Scaffold for "most in T seconds / first to goal" games (`c[n]`, `add(n,a)`, `end(w,msg)`, `left()`) |
+| `PX(n)`, `pick`, `randi`, `winnerOf` | kit/party | Small helpers |
+| `C`, `M` | phone | Link/UI state; motion state and its sign auto-detection |
+| `applyUi`, `renderGrid`, `camOn/camSample`, `ballsOn/ballsStep`, `phoneFx`, `phoneLoop` | phone | Controller screens and local feedback |
 
 ---
 
 ## 3. Link protocol
 
-The host creates peer `mg2p-<random>` (kept in `sessionStorage`, so a reload keeps the same QR when possible) and renders two QRs: `<phone URL>#pair=<id>&p=1` and `…&p=2`. The phone URL is the host's own https URL, or the "Phone page URL" setting (default `https://anmayvaa.github.io/2_players_games_phone-con/`) when the host runs from `file://` or plain http.
-
-Phone tap **Connect & start** → `AU.unlock()` + motion permission (both `requestPermission()` calls start synchronously in the tap) + wake lock → `peer.connect(hostId, {serialization:"json", reliable:true})`. A watchdog redials if the link has been down for more than 5 s. A new phone that sends `hi` for a taken slot replaces the old connection.
+The host creates peer `mg2p-<random>` (kept in `sessionStorage`) and shows two QRs: `<phone URL>#pair=<id>&p=1` / `&p=2`. The phone taps **Connect & start** → audio unlock + motion permission (requested synchronously in the tap) + wake lock → `peer.connect(hostId, {serialization:"json", reliable:true})`. A watchdog redials when the link has been down for more than 5 s. If the host sees no sensor stream for 5 s, it frees the slot.
 
 ### Phone → host
 | `t` | Payload | Rate |
 |---|---|---|
 | `hi` | `p`, `name`, `ios` | on open |
-| `s` | `u:[x,y,z]` up-vector (G), `l` peak linear accel (G), `r` peak gyro (°/s), `d` dial (°), `tc` 0/1, `bt` bitmask (1 gas, 2 brake) | every 20 ms |
-| `tap` | — | every pointer-down (ready / rematch / shoot) |
+| `s` | `u` up-vector, `l` peak lin G, `r` peak gyro, `d` dial, `tc`, `bt`, `a` lin accel, `vz:[min,max]`, `g` gyro, `gp` gyro at peak, `rot:[rx,ry,rz]` | every 20 ms |
+| `tap` | — | every pointer-down outside grid buttons |
+| `btn` | `v` | grid button pressed |
+| `color` | `rgb:[r,g,b]` | tap in camera mode (average of the centre) |
 | `pong` | `ts` | reply to ping |
 
-`l` and `r` are **peaks since the last send**, so short spikes (swings, shakes) are never lost between samples.
+Peaks and min/max are taken **since the last send**, so short spikes are never lost.
 
 ### Host → phone
 | `t` | Payload | Effect |
 |---|---|---|
-| `welcome` | `p`, `color` | |
-| `ui` | `mode` (`text`/`saber`/`race`/`safe`), `icon`, `title`, `hint`, `tap`, `bar`, `bg`, `flash`, `target`, `lock`, `of` | Whole controller screen |
-| `bar` | `v` 0–1 | Progress bar (throttled by `phoneBar`) |
-| `big` | `text` | Big pop-up text (countdown 3-2-1, GO!) |
-| `fx` | `k`: `buzz{ms}`, `hit`, `clash`, `pop`, `fire`, `shot`, `win`, `lose`, `unlock`, `lap`, `splash`, `tick`, `swish` | Vibrate (Android) and/or sound + flash |
-| `ping` | `ts`, `lat` | Every 2 s |
+| `ui` | `mode`, `icon`, `title`, `hint`, `tap`, `bar`, `bg`, `flash`, `loop`, `every` + mode extras | Whole controller screen |
+| ui `mode` | `text` · `grid` (`buttons:[{t,v,on,dis,c,wide}]`, `cols`, `small`) · `cam` (`target` css colour) · `balls` (`n`, `seed`) · `saber` · `race` · `safe` (`target`, `lock`, `of`) | |
+| `bar` | `v` 0–1 | progress bar |
+| `big` | `text` | big pop-up (countdown, GO!) |
+| `fx` | `k`: buzz, hit, clash, pop, fire, shot, win, lose, unlock, lap, splash, ring, good, bad, or any `AU.sfx` name | sound + vibration + flash |
+| `loop` / ui.`loop` | `k` sound name, `every` ms | repeating sound on the phone (telephone ring, hide & seek chirp, crying baby) |
+| `ping` | `ts`, `lat` | every 2 s |
 
 ---
 
-## 4. Sensor maths
+## 4. Sensors, events and poses
 
-- **Up-vector `u`** (device frame: x right, y toward the top of the phone, z out of the screen), in G = `accelerationIncludingGravity × sign / 9.81`. Android follows the spec (+g points up). iOS has historically been inverted, so `M.sign` starts at −1 on iOS and is **learned** by voting the dot product with the orientation-derived up `(-cosβ·sinγ, sinβ, cosβ·cosγ)`.
-- **Upright** (saber hilt) = `us[1] > 0.72`. **Holstered** (quick draw) = `us[1] < −0.6`. **Raised/aiming** = `|us[1]| < 0.6`.
-- **Steering**: θ = atan2(u_y, u_x), the angle of gravity in the screen plane. A clockwise wheel turn makes θ increase, which is steer right. "Straight" `th0` = θ snapped to the nearest 90° (works for both landscape directions and for portrait). It is learned lazily once the phone is no longer flat, and re-learned when the grip is off by more than 80° for 0.5 s. Full lock is at 35°, with a 3° dead zone.
-- **Race buttons layout** on the phone follows `u_x` (works with rotation lock): `L` = top points left → GAS on the device bottom half; `R` = mirrored; `P` = page rotated or portrait → left/right halves. Labels rotate ±90° so they read upright.
-- **Dial** = ∫ rotationRate.alpha dt on the phone (rotation around the screen normal).
+- **Up-vector `u`** (device frame: x right, y toward the top, z out of the screen), in G. `M.sign` fixes the iOS/Android sign difference. The phone learns it by voting against the orientation-derived up-vector `(-cosβ·sinγ, sinβ, cosβ·cosγ)`. The same sign is applied to `acceleration`.
+- **Vertical accel** `vz = a · û` (+ = accelerating upward).
+- **Events** (`EV.run`, every sample; keyboard Q/U fires all of them):
+
+| Event | Rule |
+|---|---|
+| `shake` | `l > 1.2 G`, re-armed below 0.6 |
+| `punch` | `l > 1.6 G`, re-armed below 0.5 |
+| `swing` | gyro > 420 °/s, re-armed below 150 |
+| `jump` | `vz max > 0.9 G` |
+| `pump` | `vz min < −0.55 G` (strong down stroke) |
+| `squat` | a down-phase (`vz < −0.25`) followed within 1.6 s by an up-phase (`vz > 0.25`), at most every 650 ms |
+| `stroke` | one smooth push `l > 0.35` ending below 0.15. Strength = peak, which Shave uses to detect "too rough" |
+| `impact` | `l > 1.8` then stillness within 500 ms (slam on a table) |
+
+- **`S.pose(p)`**: `up` / `down` (top of the phone points up / down), `left` / `right` (tipped sideways), `flat` (screen up), `face` (screen down), `mid`. Keyboard: W/S/A/D/E.
+- **`S.still(p)`**: gyro < 25 °/s and `l < 0.12`.
+- **Steering** (Tilt Racer): θ = atan2(u_y, u_x), snapped "straight" learned lazily (see `S.steer`).
+- **Aiming** (UFOs): cursor = −dial (yaw) and `rot[0]` (pitch) × 16 px/°, re-centred by dragging at the screen edges.
+- **Rhythm games** (Air Guitar, Dance Off, Hip Bump) judge an event at `t = arrival − one-way latency` against `MUSIC.at(beat)`.
 
 ---
 
 ## 5. Game objects
 
 ```js
-{ id, name, icon, tag, desc, how:[...], phoneHow, keys, bg, options?:[{key,label,values,def}],
-  reset(), begin?(), update(dt, t), draw(ctx, t),
-  onSample?(p, dt, lin, gyro),   // every sensor message (also synthetic from keyboard Q/U: l=2.6, r=800)
-  onTap?(p, t),                  // t is latency-corrected (now − one-way latency)
-  phoneUi(p), stop?() }
+{ id, cat: "classic" | "party" | "original", name, icon, tag, col (card colour), desc, how:[...], phoneHow,
+  keys?, phoneOnly?, dark? (light HUD text), options?:[{key,label,values,def}],
+  reset(), begin?(), update(dt, t), draw(ctx, t), stop?(),
+  onSample?(p, dt, lin, gyro), onEvent?(p, name, strength, t), onTap?(p, t), onBtn?(p, v), onColor?(p, rgb), onKb?(p),
+  phoneUi(p) }
 ```
-- `reset()` runs on open, on rematch and at countdown start. `begin()` runs at GO.
-- `update`, `onSample` and `onTap` only run in phase `play`. Call `finish(winner | 0, detail)` once. Most games wait ~1.5 s after the decisive moment so the animation can play.
-- Options are stored per game in `localStorage["mg2p-opts"]` (Race: laps 2/3).
-- **To add a game:** write the object, append it to `GAMES`, and use only `S.*` / `p.l` / `p.r` / `p.d` / `onTap` for input so the keyboard fallback keeps working.
+- `reset()` runs on open, on rematch and at countdown start. `begin()` runs at GO (start `MUSIC` here). `stop()` runs when leaving.
+- Input hooks run only in phase `play`. Call `finish(winner | 0, detail)` once, usually ~1.5 s after the decisive moment.
+- Call `pushUi(p)` / `pushUiAll()` whenever the phone screen for the game state changes.
+- Register the game by adding it to `GAMES.push(...)` at the bottom of `games-party.js`. The hub tabs come from `cat`.
+- Keyboard support is free for games that use `onEvent` / `onTap` / `S.*`. Give `onKb` when Q/U should mean something specific. Set `phoneOnly` when keyboard play makes no sense.
 
 ---
 
-## 6. Tuning constants (play-test on real phones)
+## 6. Adaptations from the originals
 
-| Game | Constant | Value |
-|---|---|---|
-| Champagne | pressure rate | `(l − 0.35) × 12` per s, leak 2.5/s, pop at 100 |
-| Saber | attack | gyro peak > 420 °/s, cooldown 0.65 s, travel 0.3 s, dmg 10–25 |
-| Saber | block | `us[1] > 0.72` and gyro < 260 °/s; stamina −20/s, broken 1.8 s; blocked attacker stunned 0.8 s; two swings within 0.2 s = clash |
-| Race | car | accel 330, brake 540, reverse −150, vmax 440 (grass 170), steer 2.7 rad/s |
-| Quick Draw | timing | holster both for 1 s, then random 1.8–4.2 s wait |
-| Steady Hands | spill/s | `(gyro−5)·0.22 + (l−0.06)·35 + (tilt−12°)·0.9`, 30 s |
-| Safe | lock | target 70–240° away, within ±6° and gyro < 45 °/s for 1 s |
+The originals rely on HD Rumble, the IR camera or many players. Here is how each was translated:
+
+| Original idea | Here |
+|---|---|
+| HD Rumble (Ball Count, Safe, Sneaky Dice) | Sounds on the phone speaker, plus vibration on Android. Ball Count simulates the balls on the phone itself |
+| IR camera (Eating Contest) | Tap-to-bite with a choke rule |
+| Joy-Con squeeze (Milk) | Thumb on the screen + downward pump |
+| Clap the Joy-Con (Samurai Training) | Sharp shake/jerk of the phone between the palms (or tap) |
+| Team / up to 100 players (Party Pack) | Always 1 vs 1 |
+| Hide the Joy-Con | Hide the phone. It chirps. Picking it up stops the clock |
+| Smart-device camera (Color Shoot) | Phone back camera; colour match by hue/saturation/lightness |
 
 ---
 
 ## 7. Testing without phones
 
-Playwright (Chromium), one browser and three contexts (host desktop 1600×900, `devices['iPhone 14']`, `devices['Pixel 7']`):
-- Serve the files by routing `https://anmayvaa.github.io/2_players_games_phone-con/**` to the local folder (gives a secure context).
-- If the public PeerJS server is unreachable, run a local one (`npm i peer`, `ExpressPeerServer` on 127.0.0.1:9000), open the host with `?server=ws://127.0.0.1:9000/`, and launch Chromium with `--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,LocalNetworkAccessChecks`.
+Playwright (Chromium), one browser:
+- Route `https://anmayvaa.github.io/2_players_games_phone-con/**` to the local folder (gives a secure context). Also route unpkg / cdnjs / Google Fonts to local copies or empty responses.
+- Use a local PeerJS server (`npm i peer`, `ExpressPeerServer` on 127.0.0.1:9000) and open the host with `?server=ws://127.0.0.1:9000/`. Launch Chromium with `--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,LocalNetworkAccessChecks,WebRtcHideLocalIpsWithMdns` and `--use-fake-device-for-media-stream`.
 - Synthetic sensors: an init script dispatches `DeviceMotionEvent` / `DeviceOrientationEvent` every 16 ms from `window.__mot = {g, a, r, o}`.
-- Race buttons need real touches: CDP `Input.dispatchTouchEvent` on `#rb-gas`.
+- Keyboard bots (Q/U + WASD) can finish every non-phone-only game. Phone-only games are played with phone bots tapping grid buttons.
 
 ---
 
 ## 8. Rules for future edits
 
-1. All input goes through `S.*` / `onSample` / `onTap` so phones and keyboard behave the same.
+1. All input goes through `S.*`, `onEvent`, `onSample`, `onTap`, `onBtn` and `onColor`, so phones and keyboard behave the same.
 2. Feedback that must happen on the phone uses `fx()` / `pushUi()`. Never rely on vibration alone, because iPhone needs the sound path.
-3. Keep messages small JSON (2-decimal rounding) and the sensor send interval at 20 ms.
-4. Don't overwrite a `#pair=` hash. A phone page with `#pair` must never become a host.
-5. Commit and push only after the owner approves. Commits are authored by AnMayVaa with no AI attribution.
+3. Keep messages small JSON and the sensor interval at 20 ms.
+4. Don't overwrite a `#pair=` hash. A phone page must never become a host.
+5. No Nintendo names, logos, characters or assets in the UI or graphics. Keep the mini-game names generic.
+6. Commit and push only after the owner approves. Commits are authored by AnMayVaa with no AI attribution.

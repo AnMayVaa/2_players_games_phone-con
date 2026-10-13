@@ -16,6 +16,7 @@ function mkPlayer(n) {
     tc: false, bt: 0,              // touching, buttons bitmask (1 gas, 2 brake)
     lastS: 0, ready: false, th0: 0, tapT: 0,
     kb: { steer: 0, gas: false, brake: false, b: false },
+    a: [0, 0, 0], vz: [0, 0], g: [0, 0, 0], gp: [0, 0, 0], rot: [0, 0, 0], ev: {},
     _bar: -1, _barT: 0,
   };
 }
@@ -44,6 +45,29 @@ function phoneBar(p, v) {
 }
 
 /* ---------------- input signals (phone or keyboard) ---------------- */
+/* Motion "events" detected from the sensor stream (same thresholds for every game).
+   Games receive them in onEvent(p, name, strength, t). Keyboard Q/U fires them too. */
+const EVENTS = ["shake", "swing", "punch", "jump", "squat", "pump", "stroke", "impact"];
+const EV = {
+  run(p) {
+    const e = p.ev, T = now(), t = T - p.lat, [vmin, vmax] = p.vz;
+    const fire = (k, v) => { if (H.phase === "play" && H.game && H.game.onEvent) H.game.onEvent(p, k, v, t); };
+    if (e.shake !== 0 && p.l > 1.2) { e.shake = 0; fire("shake", p.l); } else if (e.shake === 0 && p.l < 0.6) e.shake = 1;
+    if (e.punch !== 0 && p.l > 1.6) { e.punch = 0; fire("punch", p.l); } else if (e.punch === 0 && p.l < 0.5) e.punch = 1;
+    if (e.swing !== 0 && p.r > 420) { e.swing = 0; fire("swing", p.r); } else if (e.swing === 0 && p.r < 150) e.swing = 1;
+    if (e.jump !== 0 && vmax > 0.9) { e.jump = 0; fire("jump", vmax); } else if (e.jump === 0 && vmax < 0.3 && vmin > -0.3) e.jump = 1;
+    if (e.pump !== 0 && vmin < -0.55) { e.pump = 0; fire("pump", -vmin); } else if (e.pump === 0 && vmin > -0.15) e.pump = 1;
+    if (vmin < -0.25 && !e.sqD) e.sqD = T;                       // squat: a down-phase followed by an up-phase
+    if (e.sqD && vmax > 0.25 && T - e.sqD > 150) { if (T - (e.sqL || 0) > 650) { e.sqL = T; fire("squat", 1); } e.sqD = 0; }
+    if (e.sqD && T - e.sqD > 1600) e.sqD = 0;
+    if (!e.stT && p.l > 0.35) { e.stT = T; e.stM = p.l; }        // stroke: one smooth push (shave, wipe)
+    else if (e.stT) { e.stM = Math.max(e.stM, p.l); if (p.l < 0.15) { if (T - e.stT > 60) fire("stroke", e.stM); e.stT = 0; } }
+    if (p.l > 1.8) e.imT = T;                                     // impact: a hard knock then stillness (slam on a table)
+    if (e.imT && T - e.imT < 500 && T - e.imT > 60 && p.l < 0.15 && p.r < 60) { e.imT = 0; fire("impact", 1); }
+    else if (e.imT && T - e.imT > 500) e.imT = 0;
+  },
+};
+
 const S = {
   up: p => (p.phone ? p.us[1] : p.kb.b ? 1 : 0),           // +1 = phone top points up (saber hilt), -1 = down
   gas: p => !!(p.bt & 1) || p.kb.gas,
@@ -64,6 +88,14 @@ const S = {
     else p.offT = 0;
     return Math.sign(rel) * clamp((Math.abs(rel) - 3) / 32, 0, 1);
   },
+  /** coarse pose: up (top points up) | down | left (top points left) | right | flat (screen up) | face (screen down) | mid */
+  pose(p) {
+    if (!p.phone) { const k = p.kb; return k.gas ? "up" : k.brake ? "down" : k.steer < 0 ? "left" : k.steer > 0 ? "right" : k.b ? "up" : "flat"; }
+    const [x, y, z] = p.us;
+    if (y > 0.65) return "up"; if (y < -0.65) return "down"; if (x > 0.65) return "left"; if (x < -0.65) return "right";
+    if (z > 0.7) return "flat"; if (z < -0.7) return "face"; return "mid";
+  },
+  still(p, k = 1) { return p.phone ? p.r < 25 * k && p.l < 0.12 * k : !(p.kb.steer || p.kb.gas || p.kb.brake) && now() - (p.kbT || 0) > 300; },
   tiltFrom(p, b) {
     const u = p.us, m = Math.hypot(u[0], u[1], u[2]) || 1, mb = Math.hypot(b[0], b[1], b[2]) || 1;
     return (Math.acos(clamp((u[0] * b[0] + u[1] * b[1] + u[2] * b[2]) / (m * mb), -1, 1)) * 180) / Math.PI;
@@ -138,10 +170,14 @@ function hostRx(conn, m) {
       p.lastS = t;
       if (Array.isArray(m.u)) { p.u = m.u; for (let i = 0; i < 3; i++) p.us[i] = lerp(p.us[i], +m.u[i] || 0, 0.3); }
       p.l = +m.l || 0; p.r = +m.r || 0; p.d = +m.d || 0; p.tc = !!m.tc; p.bt = m.bt | 0;
+      if (m.a) p.a = m.a; if (m.vz) p.vz = m.vz; if (m.g) p.g = m.g; if (m.gp) p.gp = m.gp; if (m.rot) p.rot = m.rot;
       sample(p, dt, p.l, p.r);
+      EV.run(p);
       break;
     }
     case "tap": onTap(p, now() - p.lat); break;                  // p.lat is already one-way
+    case "btn": if (H.phase === "play" && H.game.onBtn) H.game.onBtn(p, m.v); break;
+    case "color": if (H.phase === "play" && H.game.onColor && Array.isArray(m.rgb)) H.game.onColor(p, m.rgb); break;
     case "pong": p.lat = Math.round((now() - m.ts) / 2); break;   // one-way estimate
   }
 }
@@ -182,15 +218,35 @@ function toast(msg) {
 }
 
 /* ---------------- hub ---------------- */
+const CATS = [
+  { id: "all", label: "All games" },
+  { id: "classic", label: "Duel Classics" },
+  { id: "party", label: "Party Pack" },
+  { id: "original", label: "Originals" },
+];
+const CARD_COLORS = ["#ff5a5f", "#1fb6ff", "#ffb400", "#2bd47d", "#a66bff", "#ff7ac8", "#00c2c7", "#ff8a3d"];
 function buildHub() {
-  const box = $("#games");
-  GAMES.forEach(G => {
+  const box = $("#games"), tabs = $("#tabs");
+  GAMES.forEach((G, i) => {
     const b = document.createElement("button");
-    b.className = "gcard"; b.type = "button"; b.dataset.id = G.id;
-    b.innerHTML = `<span class="gi">${G.icon}</span><b>${G.name}</b><p>${G.desc}</p><span class="tag">${G.tag}</span>`;
+    b.className = "gcard"; b.type = "button"; b.dataset.id = G.id; b.dataset.cat = G.cat || "original";
+    b.style.setProperty("--gc", G.col || CARD_COLORS[i % CARD_COLORS.length]);
+    b.innerHTML = `<span class="gi">${G.icon}</span><b>${G.name}</b><p>${G.desc}</p><span class="tags"><span class="tag">${G.tag}</span>${G.phoneOnly ? '<span class="tag ph">📱 phones</span>' : ""}</span>`;
     b.onclick = () => { AU.init(); openGame(G.id); };
     box.appendChild(b);
   });
+  const show = cat => {
+    $$(".tab", tabs).forEach(t => t.classList.toggle("sel", t.dataset.cat === cat));
+    $$(".gcard", box).forEach(b => (b.hidden = cat !== "all" && b.dataset.cat !== cat));
+    store.set("mg2p-tab", cat);
+  };
+  CATS.forEach(c => {
+    const n = c.id === "all" ? GAMES.length : GAMES.filter(g => (g.cat || "original") === c.id).length;
+    const t = document.createElement("button"); t.type = "button"; t.className = "tab"; t.dataset.cat = c.id;
+    t.innerHTML = `${c.label} <small>${n}</small>`; t.onclick = () => show(c.id);
+    tabs.appendChild(t);
+  });
+  show(store.get("mg2p-tab", "all"));
   const inp = $("#phone-url");
   inp.value = phoneBase();
   if (location.protocol === "https:") inp.disabled = true;
@@ -252,7 +308,7 @@ function pushUiAll() { pushUi(H.P[1]); pushUi(H.P[2]); }
 
 function openGame(id) {
   const G = GAMES.find(g => g.id === id); if (!G) return;
-  H.game = G; H.phase = "intro";
+  H.game = G; H.phase = "intro"; MUSIC.stop();
   H.P[1].ready = H.P[2].ready = false;
   FX.clear(); SHAKE.v = 0;
   G.reset();
@@ -267,7 +323,7 @@ function showIntro() {
   box.querySelector(".i-name").textContent = G.name;
   box.querySelector(".i-desc").textContent = G.desc;
   box.querySelector(".i-how").innerHTML = G.how.map(h => `<li>${h}</li>`).join("");
-  box.querySelector(".i-keys").textContent = "⌨ " + G.keys;
+  box.querySelector(".i-keys").textContent = G.phoneOnly ? "📱 This game needs both phones (no keyboard mode)." : "⌨ " + (G.keys || "No phone: Q / U = action, W A S D / I J K L = tilt, E / O = hold");
   const opts = box.querySelector(".i-opts"); opts.innerHTML = "";
   const cur = H.optsFor(G);
   (G.options || []).forEach(op => {
@@ -308,7 +364,7 @@ function sample(p, dt, l, r) { if (H.phase === "play" && H.game && H.game.onSamp
 
 function startCountdown() {
   if (!H.game || H.phase === "count" || H.phase === "play") return;
-  AU.init();
+  AU.init(); MUSIC.stop();
   H.phase = "count"; H.countT = now(); H.countN = 0;
   FX.clear(); SHAKE.v = 0;
   H.game.reset();
@@ -320,7 +376,7 @@ function rematch() { H.P[1].ready = H.P[2].ready = false; startCountdown(); }
 /** called by games when the match is decided. w = 1 | 2 | 0 (draw) */
 function finish(w, detail) {
   if (H.phase !== "play") return;
-  H.phase = "result"; H.result = { w, detail };
+  H.phase = "result"; H.result = { w, detail }; MUSIC.stop();
   if (w) { H.wins[w]++; saveWins(); }
   H.P[1].ready = H.P[2].ready = false;
   AU.sfx(w ? "win" : "lose");
@@ -338,6 +394,7 @@ function finish(w, detail) {
 
 function backToHub() {
   if (H.game && H.game.stop) H.game.stop();
+  MUSIC.stop();
   H.phase = "hub"; H.game = null;
   $("#game").hidden = true; $("#hub").hidden = false;
   $("#intro").hidden = true; $("#result").hidden = true;
@@ -361,7 +418,15 @@ function bindKeys() {
   addEventListener("mousemove", () => { H.mouseT = now(); });
 }
 /** Q / U = one "action": a tap, a shake burst and a swing */
-function kbAction(p) { onTap(p, now()); if (H.phase === "play") sample(p, 0.3, 2.6, 800); }
+function kbAction(p) {
+  p.kbT = now();
+  onTap(p, now());
+  if (H.phase !== "play") return;
+  const G = H.game;
+  if (G.onKb) { G.onKb(p); return; }
+  sample(p, 0.3, 2.6, 800);
+  if (G.onEvent) for (const k of EVENTS) G.onEvent(p, k, k === "swing" ? 800 : k === "stroke" ? 1 : 2.6, now());
+}
 function kbUpdate(dt) {
   for (const n of [1, 2]) {
     const p = H.P[n], k = KEYMAP[n], K = H.keys;
@@ -467,7 +532,7 @@ const FX = {
 
 /* ---------------- drawing helpers ---------------- */
 function text(c, s, x, y, size, color, align = "center", weight = 800, base = "middle", shadow) {
-  c.font = `${weight} ${size}px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`;
+  c.font = `${weight} ${size}px "M PLUS Rounded 1c",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`;
   c.textAlign = align; c.textBaseline = base;
   if (shadow) { c.save(); c.shadowColor = shadow; c.shadowBlur = size * 0.15; c.shadowOffsetY = size * 0.04; }
   c.fillStyle = color; c.fillText(s, x, y);

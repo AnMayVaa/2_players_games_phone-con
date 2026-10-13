@@ -687,4 +687,4 @@ const Safe = {
   },
 };
 
-const GAMES = [Champagne, Saber, Race, Draw, Zen, Safe];
+const GAMES = [];   // filled in games-party.js (registry)

@@ -3,9 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#0b0c16">
+<meta name="theme-color" content="#f6f5f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>2P Phone Party</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -15,8 +18,8 @@
   <div id="hub">
     <header class="top">
       <div class="brand">
-        <span class="logo">🎮</span>
-        <div><h1>2P Phone Party</h1><p>This screen is the console · two phones are the controllers</p></div>
+        <span class="logo"><i></i><i></i></span>
+        <div><h1><b>2P</b> Phone <em>Party</em></h1><p>Look at each other, not the screen! · two phones are the controllers</p></div>
       </div>
       <div class="top-r">
         <div class="score-pill"><b style="color:var(--p1)" id="sc1">0</b> : <b style="color:var(--p2)" id="sc2">0</b></div>
@@ -46,7 +49,7 @@
       </aside>
 
       <main>
-        <h2 class="sec">Pick a game</h2>
+        <nav id="tabs"></nav>
         <div id="games" class="games"></div>
         <details class="settings">
           <summary>Settings &amp; help</summary>
@@ -145,7 +148,7 @@
   </div>
 
   <div id="c-start">
-    <div class="big-ic">🎮</div>
+    <div class="big-ic">📱</div>
     <h1 id="c-start-title">Player 1</h1>
     <p>Controller for the big screen</p>
     <label class="name-l">Your name <input id="c-nameinp" maxlength="16" autocomplete="off" autocapitalize="words"></label>
@@ -177,6 +180,21 @@
       <div class="rbtn" id="rb-gas"><span>GAS ▶</span></div>
       <div id="race-tip"><span>Hold sideways · tilt to steer</span></div>
     </div>
+    <div class="lay" id="lay-grid" hidden>
+      <div id="g-title"></div>
+      <div id="g-hint"></div>
+      <div id="g-btns"></div>
+    </div>
+    <div class="lay" id="lay-cam" hidden>
+      <video id="cam-v" playsinline muted autoplay></video>
+      <div id="cam-reticle"></div>
+      <div id="cam-bar"><span>Find:</span><i id="cam-target"></i><span>Shot:</span><i id="cam-shot"></i></div>
+      <div id="cam-hint"></div>
+    </div>
+    <div class="lay" id="lay-balls" hidden>
+      <div id="balls-box">?</div>
+      <div id="balls-hint">Tilt slowly and listen…</div>
+    </div>
     <div class="lay" id="lay-safe" hidden>
       <div id="safe-info">Lock 1 / 3</div>
       <div id="dial"><div id="dial-face"></div><div id="dial-num"></div><div id="dial-mark"></div><div id="dial-hub"></div></div>
@@ -189,8 +207,12 @@
 
 <script src="js/core.js"></script>
 <script src="js/host.js"></script>
+<script src="js/kit.js"></script>
 <script src="js/phone.js"></script>
 <script src="js/games.js"></script>
+<script src="js/games-classic.js"></script>
+<script src="js/games-classic2.js"></script>
+<script src="js/games-party.js"></script>
 <script>boot();</script>
 </body>
 </html>

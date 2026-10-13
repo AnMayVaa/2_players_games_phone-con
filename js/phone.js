@@ -13,7 +13,11 @@ const C = {
 /* Motion state. u = "up" vector in the device frame (x right, y top, z out of screen), in G.
    Android and iOS disagree on the sign of accelerationIncludingGravity, so the sign is
    learned by comparing with the orientation-derived up vector (M.sign). */
-const M = { u: [0, 0, 1], raw: [0, 0, 9.81], has: false, lin: 0, gyro: 0, pkL: 0, pkR: 0, dial: 0, lastT: 0, sign: IS_IOS ? -1 : 1, vote: 0, gotEvent: false };
+const M = {
+  u: [0, 0, 1], raw: [0, 0, 9.81], has: false, lin: 0, gyro: 0, pkL: 0, pkR: 0, dial: 0, rx: 0, ry: 0, lastT: 0,
+  sign: IS_IOS ? -1 : 1, vote: 0, gotEvent: false,
+  a: [0, 0, 0], vz: 0, vzMin: 0, vzMax: 0, g: [0, 0, 0], gp: [0, 0, 0],   // linear accel (G), vertical accel (G, + up), gyro °/s, gyro at peak
+};
 
 function onMotion(e) {
   M.gotEvent = true;
@@ -23,12 +27,22 @@ function onMotion(e) {
     M.raw = [g.x, g.y, g.z]; M.has = true;
     const s = M.sign / 9.81; M.u = [g.x * s, g.y * s, g.z * s];
   }
-  const lin = a && a.x != null ? Math.hypot(a.x, a.y, a.z) / 9.81 : Math.abs(Math.hypot(M.raw[0], M.raw[1], M.raw[2]) / 9.81 - 1);
+  const um = Math.hypot(M.u[0], M.u[1], M.u[2]) || 1;
+  let lin, vz;
+  if (a && a.x != null) {
+    const s = M.sign / 9.81; M.a = [a.x * s, a.y * s, a.z * s];
+    lin = Math.hypot(M.a[0], M.a[1], M.a[2]);
+    vz = (M.a[0] * M.u[0] + M.a[1] * M.u[1] + M.a[2] * M.u[2]) / um;   // + = accelerating upward
+  } else { lin = Math.abs(um - 1); vz = um - 1; M.a = [0, 0, 0]; }
   M.lin = lin; M.pkL = Math.max(M.pkL, lin);
+  M.vz = vz; M.vzMin = Math.min(M.vzMin, vz); M.vzMax = Math.max(M.vzMax, vz);
   if (r && r.alpha != null) {
-    M.gyro = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
-    M.pkR = Math.max(M.pkR, M.gyro);
-    M.dial += (r.alpha || 0) * dt;           // rotation around the screen normal = safe dial
+    M.g = [r.alpha || 0, r.beta || 0, r.gamma || 0];
+    M.gyro = Math.hypot(M.g[0], M.g[1], M.g[2]);
+    if (M.gyro >= M.pkR) { M.pkR = M.gyro; M.gp = M.g.slice(); }
+    M.dial += M.g[0] * dt;                   // around the screen normal (safe dial, steering on a table)
+    M.rx += M.g[1] * dt;                     // around the device x axis (pitch: chop, aim up/down)
+    M.ry += M.g[2] * dt;                     // around the long axis (key turn, crank)
   }
 }
 function onOrient(e) {
@@ -144,9 +158,13 @@ function dial() {
 function sendTick() {
   if (!C.open || !C.conn) return;
   try {
-    C.conn.send({ t: "s", u: M.u.map(r2), l: r2(M.pkL), r: Math.round(M.pkR), d: Math.round(M.dial * 10) / 10, tc: C.ptr.size ? 1 : 0, bt: C.btn });
+    const r1 = v => Math.round(v * 10) / 10;
+    C.conn.send({
+      t: "s", u: M.u.map(r2), l: r2(M.pkL), r: Math.round(M.pkR), d: r1(M.dial), tc: C.ptr.size ? 1 : 0, bt: C.btn,
+      a: M.a.map(r2), vz: [r2(M.vzMin), r2(M.vzMax)], g: M.g.map(Math.round), gp: M.gp.map(Math.round), rot: [r1(M.rx), r1(M.ry), r1(M.dial)],
+    });
   } catch (e) {}
-  M.pkL = M.lin; M.pkR = M.gyro;
+  M.pkL = M.lin; M.pkR = M.gyro; M.gp = M.g.slice(); M.vzMin = M.vzMax = M.vz;
 }
 
 function phoneRx(m) {
@@ -158,6 +176,7 @@ function phoneRx(m) {
     case "big": big(m.text); break;
     case "ping": try { C.conn.send({ t: "pong", ts: m.ts }); } catch (e) {} status(`Connected · ${m.lat | 0} ms`, "ok"); break;
     case "fx": phoneFx(m); break;
+    case "loop": C.loop = { k: m.k, every: m.every || 2000, next: now() }; break;
   }
 }
 
@@ -174,6 +193,9 @@ function phoneFx(m) {
     case "unlock": vibrate([40, 40, 140]); AU.sfx("click"); setTimeout(() => AU.sfx("lap"), 120); flash("#2ecc71"); break;
     case "lap": vibrate(70); AU.sfx("lap"); break;
     case "splash": vibrate(300); AU.sfx("splash"); flash("#c8e6c9"); break;
+    case "ring": vibrate([400, 200, 400]); AU.sfx("ring"); break;
+    case "good": vibrate(30); AU.sfx("right"); flash("#b9f6ca"); break;
+    case "bad": vibrate([80, 40, 80]); AU.sfx("wrong"); flash("#ff8a80"); break;
     default: AU.sfx(m.k);
   }
 }
@@ -187,8 +209,13 @@ function applyUi(ui) {
   C.ui = ui;
   if (ui.color) setColor(ui.color);
   if (ui.name) $("#c-name").textContent = ui.name;
-  const mode = ["text", "saber", "race", "safe"].includes(ui.mode) ? ui.mode : "text";
-  for (const k of ["text", "saber", "race", "safe"]) $("#lay-" + k).hidden = k !== mode;
+  const MODES = ["text", "saber", "race", "safe", "grid", "cam", "balls"];
+  const mode = MODES.includes(ui.mode) ? ui.mode : "text";
+  for (const k of MODES) $("#lay-" + k).hidden = k !== mode;
+  if (mode === "grid") renderGrid(ui);
+  if (mode === "cam") camOn(ui); else camOff();
+  if (mode === "balls") ballsOn(ui); else C.balls = null;
+  if (!ui.loop) C.loop = null; else C.loop = { k: ui.loop, every: ui.every || 2000, next: now() };
   $("#c-icon").textContent = ui.icon || "";
   $("#c-title").textContent = ui.title || "";
   $("#c-hint").textContent = ui.hint || "";
@@ -206,6 +233,94 @@ function applyUi(ui) {
     $("#safe-info").textContent = ui.lock >= C.safe.of ? "Safe open! 🎉" : `Lock ${C.safe.lock + 1} / ${C.safe.of}`;
   } else C.safe.target = null;
   if (mode !== "race") C.btn = 0;
+}
+
+/* grid of buttons (quiz answers, bids, bingo card, number guesses…). Tap → {t:"btn", v} */
+function renderGrid(ui) {
+  $("#g-title").textContent = ui.title || "";
+  $("#g-hint").textContent = ui.hint || "";
+  const box = $("#g-btns");
+  box.style.gridTemplateColumns = `repeat(${ui.cols || 2}, 1fr)`;
+  box.className = ui.small ? "small" : "";
+  box.innerHTML = "";
+  (ui.buttons || []).forEach(b => {
+    const el = document.createElement("button");
+    el.type = "button"; el.textContent = b.t;
+    if (b.on) el.classList.add("on");
+    if (b.dis) el.disabled = true;
+    if (b.c) el.style.setProperty("--bc", b.c);
+    if (b.wide) el.style.gridColumn = "1 / -1";
+    el.addEventListener("pointerdown", e => {
+      e.stopPropagation(); if (el.disabled) return;
+      HAPTIC.tap(); vibrate(15); AU.tick(0.4, 2500);
+      el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 150);
+      if (C.open) { try { C.conn.send({ t: "btn", v: b.v }); } catch (_) {} }
+    });
+    box.appendChild(el);
+  });
+}
+
+/* camera: aim at something and tap → average colour of the centre is sent */
+async function camOn(ui) {
+  $("#cam-hint").textContent = ui.hint || "Aim at the colour and tap!";
+  $("#cam-target").style.background = ui.target || "transparent";
+  if (C.cam) return;
+  C.cam = { starting: true };
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 320, height: 240 }, audio: false });
+    if (!C.cam) { st.getTracks().forEach(t => t.stop()); return; }
+    C.cam = { st };
+    const v = $("#cam-v"); v.srcObject = st; v.play().catch(() => {});
+  } catch (e) { C.cam = null; $("#cam-hint").textContent = "Camera blocked: " + e.name + " — allow camera access and reload"; }
+}
+function camOff() { if (C.cam && C.cam.st) C.cam.st.getTracks().forEach(t => t.stop()); C.cam = null; }
+function camSample() {
+  const v = $("#cam-v"); if (!v.videoWidth) return null;
+  const cv = document.createElement("canvas"); cv.width = 24; cv.height = 24;
+  const g = cv.getContext("2d");
+  const s = Math.min(v.videoWidth, v.videoHeight) * 0.18;
+  g.drawImage(v, (v.videoWidth - s) / 2, (v.videoHeight - s) / 2, s, s, 0, 0, 24, 24);
+  const d = g.getImageData(0, 0, 24, 24).data; let r = 0, gg = 0, b = 0;
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+  const n = d.length / 4; return [Math.round(r / n), Math.round(gg / n), Math.round(b / n)];
+}
+
+/* ball box: balls roll with the phone's tilt; every wall hit clacks (and buzzes on Android) */
+function ballsOn(ui) {
+  $("#balls-hint").textContent = ui.hint || "Tilt slowly and listen…";
+  if (C.balls && C.balls.n === ui.n && C.balls.seed === ui.seed) return;
+  const n = ui.n | 0, B = [];
+  for (let i = 0; i < n; i++) B.push({ x: rnd(-0.8, 0.8), y: rnd(-0.8, 0.8), vx: 0, vy: 0 });
+  C.balls = { n, seed: ui.seed, B, lastT: now(), lastClack: 0 };
+}
+function ballsStep() {
+  const S2 = C.balls; if (!S2) return;
+  const t = now(), dt = Math.min(0.033, (t - S2.lastT) / 1000); S2.lastT = t;
+  const gx = -M.u[0] * 6, gy = M.u[1] * 6, R = 0.12;
+  let hits = 0, hard = 0;
+  for (const b of S2.B) {
+    b.vx += gx * dt; b.vy += gy * dt; b.vx *= 0.995; b.vy *= 0.995;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    for (const ax of ["x", "y"]) {
+      const v = ax === "x" ? "vx" : "vy";
+      if (b[ax] > 1 - R) { b[ax] = 1 - R; if (Math.abs(b[v]) > 0.25) { hits++; hard = Math.max(hard, Math.abs(b[v])); } b[v] *= -0.35; }
+      if (b[ax] < -1 + R) { b[ax] = -1 + R; if (Math.abs(b[v]) > 0.25) { hits++; hard = Math.max(hard, Math.abs(b[v])); } b[v] *= -0.35; }
+    }
+  }
+  for (let i = 0; i < S2.B.length; i++) for (let j = i + 1; j < S2.B.length; j++) {
+    const a = S2.B[i], b = S2.B[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+    if (d > 0 && d < 2 * R) {
+      const nx = dx / d, ny = dy / d, rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny, push = (2 * R - d) / 2;
+      a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
+      if (rel < 0) { a.vx += rel * nx * 0.9; a.vy += rel * ny * 0.9; b.vx -= rel * nx * 0.9; b.vy -= rel * ny * 0.9; if (-rel > 0.3) { hits++; hard = Math.max(hard, -rel); } }
+    }
+  }
+  if (hits && t - S2.lastClack > 25) {
+    S2.lastClack = t;
+    const v = clamp(hard / 2.5, 0.15, 1);
+    for (let k = 0; k < Math.min(hits, 4); k++) setTimeout(() => AU.noise(18, 0.35 + v * 0.6, 2200 + rnd(-400, 600), 4), k * 12);
+    vibrate(Math.round(8 + v * 20));
+  }
 }
 
 /* touch: every pointer-down is a "tap"; in race mode pointers are hit-tested against GAS / BRAKE */
@@ -232,7 +347,12 @@ function bindTouch() {
     try { root.setPointerCapture(e.pointerId); } catch (_) {}
     upd();
     if (C.ui.mode !== "race") HAPTIC.tap();
-    if (C.open) { try { C.conn.send({ t: "tap" }); } catch (_) {} }
+    if (C.open) {
+      try {
+        C.conn.send({ t: "tap" });
+        if (C.ui.mode === "cam") { const rgb = camSample(); if (rgb) { C.conn.send({ t: "color", rgb }); $("#cam-shot").style.background = `rgb(${rgb})`; flash("#fff"); AU.sfx("shot"); } }
+      } catch (_) {}
+    }
   });
   root.addEventListener("pointermove", e => { if (C.ptr.has(e.pointerId)) { C.ptr.set(e.pointerId, { x: e.clientX, y: e.clientY }); upd(); } });
   const end = e => { if (C.ptr.delete(e.pointerId)) upd(); };
@@ -270,6 +390,8 @@ function humOff() {
 
 function phoneLoop() {
   const mode = C.ui.mode;
+  if (C.loop && now() >= C.loop.next) { C.loop.next = now() + C.loop.every; if (C.loop.k === "ring") { AU.sfx("ring"); vibrate([300, 150, 300]); } else AU.sfx(C.loop.k); }
+  if (mode === "balls") ballsStep();
   if (mode === "saber") {
     if (!C.hum) humOn();
     const k = clamp(M.gyro / 600, 0, 1);
